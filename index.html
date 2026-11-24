@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subnet Calculator</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+/* Layout: one working column — input bar, results grid, bit-level view, splitter table, then the how-it-works notes */
+:root {
+  --bg: #f3f5f7;
+  --panel: #ffffff;
+  --fg: #16202b;
+  --muted: #5b6878;
+  --line: #d9dfe6;
+  --net: #1f4fc4;        /* network bits */
+  --net-soft: #e3eafb;
+  --host: #b85410;       /* host bits */
+  --host-soft: #fbeadd;
+  --ok: #1d7a4a;
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f151c; --panel: #161e27; --fg: #e4e9ef; --muted: #93a1b1; --line: #2a3542;
+    --net: #7ea2ff; --net-soft: #1c2a4a; --host: #f2a35e; --host-soft: #3a2616; --ok: #5fd39a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f151c; --panel: #161e27; --fg: #e4e9ef; --muted: #93a1b1; --line: #2a3542;
+  --net: #7ea2ff; --net-soft: #1c2a4a; --host: #f2a35e; --host-soft: #3a2616; --ok: #5fd39a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.5;
+}
+.wrap {
+  max-width: 980px; margin: 0 auto;
+  padding-block: 32px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: flex; flex-direction: column; gap: 28px;
+}
+header h1 {
+  font-family: var(--font-display); font-weight: 700; font-size: 2rem; margin: 0;
+  letter-spacing: -0.01em; text-wrap: balance;
+}
+header p { margin: 4px 0 0; color: var(--muted); max-width: 62ch; }
+.legend { display: inline-flex; gap: 14px; margin-top: 10px; font-size: 0.85rem; color: var(--muted); flex-wrap: wrap; }
+.legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.legend .ln::before { background: var(--net); }
+.legend .lh::before { background: var(--host); }
+
+h2 {
+  font-family: var(--font-display); font-weight: 500; font-size: 0.8rem; text-transform: uppercase;
+  letter-spacing: 0.09em; color: var(--muted); margin: 0 0 12px;
+}
+
+/* Input bar */
+.input-bar {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 18px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 18px 24px;
+}
+@media (max-width: 680px) { .input-bar { grid-template-columns: 1fr; } }
+label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--muted); margin-bottom: 6px; letter-spacing: 0.02em; }
+#addr {
+  width: 100%; font-family: var(--font-mono); font-size: 1.35rem; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg);
+}
+#addr:focus, #prefix:focus-visible, button:focus-visible, select:focus-visible { outline: 2px solid var(--net); outline-offset: 2px; }
+#addr.bad { border-color: #c4302b; }
+.hint { font-size: 0.8rem; color: var(--muted); margin-top: 6px; min-height: 1.2em; }
+.hint.err { color: #c4302b; }
+.prefix-row { display: flex; align-items: center; gap: 14px; }
+#prefix { flex: 1; min-width: 0; accent-color: var(--net); }
+#prefixOut { font-family: var(--font-mono); font-size: 1.35rem; font-weight: 600; min-width: 3.2ch; text-align: right; color: var(--net); }
+.examples { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.examples button {
+  font-family: var(--font-mono); font-size: 0.8rem; padding: 4px 9px; border-radius: 999px;
+  border: 1px solid var(--line); background: transparent; color: var(--fg); cursor: pointer;
+}
+.examples button:hover { border-color: var(--net); color: var(--net); }
+
+/* Results */
+.results { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+@media (max-width: 820px) { .results { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cell { background: var(--panel); padding: 12px 14px; min-width: 0; }
+.cell .k { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.cell .v { font-family: var(--font-mono); font-size: 1.02rem; font-weight: 500; margin-top: 2px; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.cell .s { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+.cell.key .v { color: var(--net); font-weight: 600; }
+.cell.hostc .v { color: var(--host); font-weight: 600; }
+.chip { display: inline-block; font-family: var(--font-body); font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--net-soft); color: var(--net); }
+.chip.pub { background: var(--host-soft); color: var(--host); }
+
+/* Bit view */
+.bits-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+.bits-scroll { overflow-x: auto; }
+.bits { display: grid; grid-template-columns: 124px auto 1fr; gap: 6px 14px; align-items: center; min-width: 760px; }
+.bits .rl { font-size: 0.82rem; font-weight: 600; color: var(--muted); }
+.bits .rl small { display: block; font-weight: 400; font-size: 0.72rem; }
+.bits .rv { font-family: var(--font-mono); font-size: 0.85rem; text-align: right; font-variant-numeric: tabular-nums; }
+.bitrow { display: flex; gap: 6px; }
+.octet { display: flex; gap: 1px; }
+.b {
+  width: 18px; height: 26px; display: grid; place-items: center;
+  font-family: var(--font-mono); font-size: 0.85rem; border-radius: 3px;
+}
+.b.n { background: var(--net-soft); color: var(--net); }
+.b.h { background: var(--host-soft); color: var(--host); }
+.b.one { font-weight: 600; }
+.b.zero { opacity: 0.55; }
+.b.split { background: linear-gradient(90deg, var(--net-soft) var(--cut), var(--host-soft) var(--cut)); color: var(--fg); }
+.b.edge { box-shadow: inset -2px 0 0 var(--fg); }
+.bits.v6 { grid-template-columns: 124px auto; min-width: 820px; }
+.mask-row .b { cursor: pointer; }
+.mask-row .b:hover { outline: 1px solid var(--fg); }
+.op { grid-column: 1 / -1; font-size: 0.78rem; color: var(--muted); border-top: 1px dashed var(--line); padding-top: 4px; margin-top: 2px; }
+.bits-note { font-size: 0.82rem; color: var(--muted); margin-top: 12px; }
+
+/* Splitter */
+.split-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+.split-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+.split-head p { margin: 0; color: var(--muted); font-size: 0.88rem; }
+select { font-family: var(--font-mono); font-size: 0.9rem; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+.table-wrap { overflow-x: auto; max-height: 420px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-family: var(--font-mono); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { font-family: var(--font-body); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); position: sticky; top: 0; background: var(--panel); }
+tr.mine td { background: var(--net-soft); }
+tr.mine td:first-child { color: var(--net); font-weight: 600; }
+.more { font-size: 0.82rem; color: var(--muted); margin-top: 8px; }
+
+/* Explainer */
+.explain { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 32px; }
+@media (max-width: 720px) { .explain { grid-template-columns: 1fr; } }
+.explain div { min-width: 0; }
+.explain h3 { font-family: var(--font-display); font-size: 1.05rem; font-weight: 500; margin: 0 0 4px; }
+.explain p { margin: 0; color: var(--muted); max-width: 60ch; }
+code { font-family: var(--font-mono); font-size: 0.9em; background: var(--net-soft); color: var(--fg); padding: 1px 5px; border-radius: 4px; }
+@media (prefers-reduced-motion: no-preference) { .b { transition: background-color .15s, color .15s; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Subnet Calculator</h1>
+    <p>Type an IPv4 or IPv6 address with a prefix length (IPv4 also takes a dotted subnet mask). Everything below updates as you type.</p>
+    <div class="legend"><span class="ln">Network bits</span><span class="lh">Host bits</span></div>
+  </header>
+
+  <section class="input-bar" aria-label="Input">
+    <div>
+      <label for="addr">IP address / prefix</label>
+      <input id="addr" type="text" value="192.168.10.77/26" spellcheck="false" autocomplete="off" autocapitalize="off">
+      <div class="hint" id="hint">Accepts 10.0.0.5/8, 10.0.0.5 255.0.0.0, 2001:db8::1/64, or a bare address.</div>
+    </div>
+    <div>
+      <label for="prefix">Prefix length (CIDR)</label>
+      <div class="prefix-row">
+        <input id="prefix" type="range" min="0" max="32" value="26">
+        <output id="prefixOut" for="prefix">/26</output>
+      </div>
+      <div class="examples" aria-label="Examples">
+        <button type="button" data-ex="192.168.1.130/25">192.168.1.130/25</button>
+        <button type="button" data-ex="10.42.7.9/12">10.42.7.9/12</button>
+        <button type="button" data-ex="172.20.33.200 255.255.240.0">172.20.33.200 255.255.240.0</button>
+        <button type="button" data-ex="203.0.113.9/30">203.0.113.9/30</button>
+        <button type="button" data-ex="10.0.0.0/31">10.0.0.0/31</button>
+        <button type="button" data-ex="2001:db8:abcd:12::1/64">2001:db8:abcd:12::1/64</button>
+        <button type="button" data-ex="2001:db8:5a00::/48">2001:db8:5a00::/48</button>
+        <button type="button" data-ex="fd12:3456:789a:1::/62">fd12:3456:789a:1::/62</button>
+        <button type="button" data-ex="fe80::1c2b:3ff:fe4a:9d01/64">fe80::1c2b:3ff:fe4a:9d01/64</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Result</h2>
+    <div class="results" id="results"></div>
+  </section>
+
+  <section class="bits-panel">
+    <h2>Bit by bit</h2>
+    <div class="bits-scroll"><div class="bits" id="bits"></div></div>
+    <p class="bits-note" id="bitsNote">Click any bit in the mask row to move the boundary there.</p>
+  </section>
+
+  <section class="split-panel">
+    <h2>Split this network</h2>
+    <div class="split-head">
+      <label for="splitTo" style="margin:0">Into subnets of</label>
+      <select id="splitTo"></select>
+      <p id="splitSummary"></p>
+    </div>
+    <div class="table-wrap"><table>
+      <thead id="splitHead"><tr><th>#</th><th>Network</th><th>Usable range</th><th>Broadcast</th><th>Hosts</th></tr></thead>
+      <tbody id="splitBody"></tbody>
+    </table></div>
+    <p class="more" id="splitMore"></p>
+  </section>
+
+  <section>
+    <h2>How IPv4 subnetting works</h2>
+    <div class="explain">
+      <div><h3>An address is 32 bits</h3><p>Each dotted number is one octet, 8 bits, 0–255. <code>192.168.10.77</code> is really one 32-bit number written in four pieces.</p></div>
+      <div><h3>The prefix splits it in two</h3><p><code>/26</code> means the first 26 bits name the network and the last 6 bits name a host inside it. The mask is just 26 ones followed by 6 zeros: <code>255.255.255.192</code>.</p></div>
+      <div><h3>Network = address AND mask</h3><p>A bitwise AND keeps the network bits and zeros out the host bits. That gives the first address of the block, which identifies the network itself.</p></div>
+      <div><h3>Broadcast = host bits all set to 1</h3><p>OR the network address with the inverted mask (the wildcard). The result is the last address in the block, used to reach every host at once.</p></div>
+      <div><h3>Counting hosts</h3><p>With <i>h</i> host bits the block holds 2<sup>h</sup> addresses. Subtract 2 for the network and broadcast addresses. A /26 has 2<sup>6</sup> − 2 = 62 usable hosts. /31 links use both addresses (RFC 3021) and /32 is a single host.</p></div>
+      <div><h3>Splitting</h3><p>Borrowing <i>n</i> host bits for the network makes 2<sup>n</sup> smaller subnets. A /24 split into /26s borrows 2 bits, giving 4 subnets that start every 64 addresses.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>How IPv6 is different</h2>
+    <div class="explain">
+      <div><h3>128 bits, written in hex</h3><p>Eight 16-bit groups (hextets) of 4 hex digits. Leading zeros drop and one run of all-zero groups becomes <code>::</code>, so <code>2001:0db8:0000:0000:0000:0000:0000:0001</code> is <code>2001:db8::1</code>.</p></div>
+      <div><h3>Same AND, same OR</h3><p>Network = address AND mask, last address = network OR inverted mask. Each hex digit is exactly 4 bits, so a prefix that is a multiple of 4 cuts cleanly between digits.</p></div>
+      <div><h3>No broadcast, no lost hosts</h3><p>IPv6 replaced broadcast with multicast, so nothing is subtracted. A block with <i>h</i> host bits has 2<sup>h</sup> usable addresses.</p></div>
+      <div><h3>/64 is the LAN size</h3><p>Devices build the last 64 bits (the interface ID) themselves with SLAAC, so a LAN is a /64. ISPs usually hand out a /48 or /56, which you split into /64s. A /48 holds 65,536 of them.</p></div>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const addrEl = $("addr"), prefixEl = $("prefix"), prefixOut = $("prefixOut"), hint = $("hint");
+  const DEFAULT_HINT = hint.textContent;
+  let state = { fam: 4, ip: 0, prefix: 26 }; // ip is a Number for IPv4, a BigInt for IPv6
+
+  // ---- core math (all values are unsigned 32-bit integers) ----
+  const toU32 = (n) => n >>> 0;
+  function parseIp(s) {
+    const parts = s.trim().split(".");
+    if (parts.length !== 4) return null;
+    let n = 0;
+    for (const p of parts) {
+      if (!/^\d{1,3}$/.test(p)) return null;
+      const v = Number(p);
+      if (v > 255) return null;
+      n = n * 256 + v;
+    }
+    return toU32(n);
+  }
+  const ipStr = (n) => [24, 16, 8, 0].map((s) => (n >>> s) & 255).join(".");
+  const maskOf = (p) => (p === 0 ? 0 : toU32(0xffffffff << (32 - p)));
+  function prefixOfMask(m) {
+    // valid masks are ones followed by zeros: inverting gives 2^k - 1
+    const inv = toU32(~m);
+    if ((inv & (inv + 1)) !== 0) return null;
+    let p = 0; while (p < 32 && ((m >>> (31 - p)) & 1)) p++;
+    return p;
+  }
+  function calc(ip, p) {
+    const mask = maskOf(p), wild = toU32(~mask);
+    const network = toU32(ip & mask), broadcast = toU32(network | wild);
+    const total = 2 ** (32 - p);
+    let first, last, usable;
+    if (p === 32) { first = last = network; usable = 1; }
+    else if (p === 31) { first = network; last = broadcast; usable = 2; }
+    else { first = network + 1; last = broadcast - 1; usable = total - 2; }
+    return { ip, p, mask, wild, network, broadcast, first, last, total, usable };
+  }
+  function addrClass(ip) {
+    const a = ip >>> 24;
+    if (a < 128) return "A"; if (a < 192) return "B"; if (a < 224) return "C"; if (a < 240) return "D (multicast)"; return "E (reserved)";
+  }
+  function scope(ip) {
+    const inR = (base, p) => toU32(ip & maskOf(p)) === parseIp(base);
+    if (inR("10.0.0.0", 8) || inR("172.16.0.0", 12) || inR("192.168.0.0", 16)) return ["Private", "RFC 1918"];
+    if (inR("127.0.0.0", 8)) return ["Loopback", "127.0.0.0/8"];
+    if (inR("169.254.0.0", 16)) return ["Link-local", "169.254.0.0/16"];
+    if (inR("100.64.0.0", 10)) return ["Shared / CGNAT", "RFC 6598"];
+    if (inR("192.0.2.0", 24) || inR("198.51.100.0", 24) || inR("203.0.113.0", 24)) return ["Documentation", "RFC 5737"];
+    if (inR("224.0.0.0", 4)) return ["Multicast", "224.0.0.0/4"];
+    if (inR("240.0.0.0", 4)) return ["Reserved", "240.0.0.0/4"];
+    if (inR("0.0.0.0", 8)) return ["This network", "0.0.0.0/8"];
+    return ["Public", "Internet-routable"];
+  }
+  const fmt = (n) => n.toLocaleString("en-US");
+  const bin = (n) => n.toString(2).padStart(32, "0");
+
+  // ---- IPv6 math (128-bit values as BigInt; JS bitwise ops on Numbers stop at 32 bits) ----
+  const ALL6 = (1n << 128n) - 1n;
+  function parseIp6(s) {
+    s = s.trim().toLowerCase();
+    if (!s || /[^0-9a-f:.]/.test(s)) return null;
+    if (s.includes(".")) {
+      // embedded IPv4 tail, e.g. ::ffff:192.0.2.1 → last two hextets
+      const k = s.lastIndexOf(":");
+      if (k < 0) return null;
+      const v4 = parseIp(s.slice(k + 1));
+      if (v4 === null) return null;
+      s = s.slice(0, k + 1) + (v4 >>> 16).toString(16) + ":" + (v4 & 0xffff).toString(16);
+    }
+    const halves = s.split("::");
+    if (halves.length > 2) return null;
+    const sp = (x) => (x === "" ? [] : x.split(":"));
+    let groups;
+    if (halves.length === 2) {
+      const head = sp(halves[0]), tail = sp(halves[1]);
+      if (head.length + tail.length > 7) return null;
+      groups = [...head, ...Array(8 - head.length - tail.length).fill("0"), ...tail];
+    } else {
+      groups = s.split(":");
+      if (groups.length !== 8) return null;
+    }
+    let n = 0n;
+    for (const g of groups) {
+      if (!/^[0-9a-f]{1,4}$/.test(g)) return null;
+      n = (n << 16n) | BigInt(parseInt(g, 16));
+    }
+    return n;
+  }
+  const mask6 = (p) => (p === 0 ? 0n : (ALL6 << BigInt(128 - p)) & ALL6);
+  const groups6 = (n) => Array.from({ length: 8 }, (_, i) => Number((n >> BigInt(112 - 16 * i)) & 0xffffn));
+  const expand6 = (n) => groups6(n).map((g) => g.toString(16).padStart(4, "0")).join(":");
+  function compress6(n) {
+    // RFC 5952: lowercase, no leading zeros, longest run (2+) of zero groups becomes ::
+    const g = groups6(n);
+    let bs = -1, bl = 0;
+    for (let i = 0; i < 8;) {
+      if (g[i] !== 0) { i++; continue; }
+      let j = i; while (j < 8 && g[j] === 0) j++;
+      if (j - i > bl) { bs = i; bl = j - i; }
+      i = j;
+    }
+    const h = g.map((x) => x.toString(16));
+    if (bl < 2) return h.join(":");
+    return h.slice(0, bs).join(":") + "::" + h.slice(bs + bl).join(":");
+  }
+  function calc6(ip, p) {
+    const mask = mask6(p), wild = ALL6 ^ mask;
+    const network = ip & mask, last = network | wild;
+    return { ip, p, mask, wild, network, last, total: 1n << BigInt(128 - p) };
+  }
+  const TYPES6 = [
+    ["::", 128, "Unspecified", "::/128"], ["::1", 128, "Loopback", "::1/128"],
+    ["::ffff:0:0", 96, "IPv4-mapped", "::ffff:0:0/96"], ["64:ff9b::", 96, "NAT64", "RFC 6052"],
+    ["2001:db8::", 32, "Documentation", "RFC 3849"], ["2001::", 32, "Teredo", "2001::/32"],
+    ["2002::", 16, "6to4", "2002::/16"], ["fe80::", 10, "Link-local", "fe80::/10"],
+    ["fc00::", 7, "Unique local (ULA)", "fc00::/7, private"], ["ff00::", 8, "Multicast", "ff00::/8"],
+    ["2000::", 3, "Global unicast", "Internet-routable"],
+  ].map(([b, p, name, note]) => [parseIp6(b), p, name, note]);
+  function type6(ip) {
+    for (const [base, p, name, note] of TYPES6) if ((ip & mask6(p)) === base) return [name, note];
+    return ["Reserved", "not allocated"];
+  }
+  const pow2 = (h) => `2<sup>${h}</sup>`;
+
+  // ---- input parsing ----
+  function parseInput(raw) {
+    const s = raw.trim().replace(/\s+/g, " ");
+    if (!s) return { err: "Enter an address, like 192.168.1.10/24 or 2001:db8::1/64." };
+    if (s.includes(":")) {
+      const m6 = s.match(/^([0-9a-fA-F:.]+)(?:\s*\/\s*(\d{1,3}))?$/);
+      if (!m6) return { err: "Use the form 2001:db8::1/64." };
+      const ip6 = parseIp6(m6[1]);
+      if (ip6 === null) return { err: `"${m6[1]}" is not a valid IPv6 address. Use up to 8 groups of 1–4 hex digits, with at most one "::".` };
+      let p6 = null;
+      if (m6[2] !== undefined) {
+        p6 = Number(m6[2]);
+        if (p6 > 128) return { err: "An IPv6 prefix length must be between 0 and 128." };
+      }
+      return { fam: 6, ip: ip6, prefix: p6 };
+    }
+    let ipPart = s, pre = null;
+    const m = s.match(/^([\d.]+)\s*(?:\/\s*(\d{1,2})|\s([\d.]+))?$/);
+    if (!m) return { err: "Use the form 192.168.1.10/24 or 192.168.1.10 255.255.255.0." };
+    ipPart = m[1];
+    const ip = parseIp(ipPart);
+    if (ip === null) return { err: `"${ipPart}" is not a valid IPv4 address. Each of the 4 parts must be 0–255.` };
+    if (m[2] !== undefined) {
+      pre = Number(m[2]);
+      if (pre > 32) return { err: "The prefix length must be between 0 and 32." };
+    } else if (m[3] !== undefined) {
+      const mask = parseIp(m[3]);
+      if (mask === null) return { err: `"${m[3]}" is not a valid subnet mask.` };
+      pre = prefixOfMask(mask);
+      if (pre === null) return { err: `${m[3]} is not a valid mask: its 1 bits must all come before its 0 bits.` };
+    }
+    return { fam: 4, ip, prefix: pre };
+  }
+
+  // ---- render ----
+  function cell(k, v, s, cls) {
+    return `<div class="cell ${cls || ""}"><div class="k">${k}</div><div class="v">${v}</div>${s ? `<div class="s">${s}</div>` : ""}</div>`;
+  }
+  function renderResults(r) {
+    const [sc, scNote] = scope(r.ip);
+    const range = r.p === 32 ? ipStr(r.first) : `${ipStr(r.first)} – ${ipStr(r.last)}`;
+    $("results").innerHTML = [
+      cell("Network", `${ipStr(r.network)}/${r.p}`, "address AND mask", "key"),
+      cell("Broadcast", r.p >= 31 ? "none" : ipStr(r.broadcast), r.p >= 31 ? (r.p === 31 ? "point-to-point link" : "single host") : "host bits all 1", "hostc"),
+      cell("Usable hosts", fmt(r.usable), `${fmt(r.total)} addresses in block`),
+      cell("Host range", range, ""),
+      cell("Subnet mask", ipStr(r.mask), `/${r.p} · ${r.p} network bits`),
+      cell("Wildcard mask", ipStr(r.wild), "inverse of the mask (ACLs, OSPF)"),
+      cell("Address class", addrClass(r.ip), "historic, pre-CIDR"),
+      cell("Scope", `<span class="chip ${sc === "Public" ? "pub" : ""}">${sc}</span>`, scNote),
+    ].join("");
+  }
+  function bitRow(n, p, extraCls) {
+    const b = bin(n);
+    let html = `<div class="bitrow ${extraCls || ""}">`;
+    for (let o = 0; o < 4; o++) {
+      html += `<div class="octet">`;
+      for (let i = o * 8; i < o * 8 + 8; i++) {
+        const c = i < p ? "n" : "h";
+        const edge = i === p - 1 && p < 32 ? " edge" : "";
+        html += `<span class="b ${c} ${b[i] === "1" ? "one" : "zero"}${edge}" data-p="${i + 1}">${b[i]}</span>`;
+      }
+      html += `</div>`;
+    }
+    return html + `</div>`;
+  }
+  function renderBits(r) {
+    const row = (label, sub, n, cls) =>
+      `<div class="rl">${label}<small>${sub}</small></div>${bitRow(n, r.p, cls)}<div class="rv">${ipStr(n)}</div>`;
+    $("bits").innerHTML =
+      row("IP address", "your input", r.ip) +
+      row("Subnet mask", `${r.p} ones, ${32 - r.p} zeros`, r.mask, "mask-row") +
+      `<div class="op">AND: keep a bit only where the mask has a 1</div>` +
+      row("Network", "first address", r.network) +
+      `<div class="op">OR with wildcard: set every host bit to 1</div>` +
+      row("Broadcast", "last address", r.broadcast);
+  }
+  function renderSplit(r) {
+    const sel = $("splitTo");
+    const prev = Number(sel.value);
+    const maxP = Math.min(32, r.p + 12);
+    if (r.p >= 32) {
+      sel.innerHTML = ""; sel.disabled = true;
+      $("splitSummary").textContent = "A /32 is a single address and cannot be split.";
+      $("splitBody").innerHTML = ""; $("splitMore").textContent = ""; return;
+    }
+    sel.disabled = false;
+    $("splitHead").innerHTML = "<tr><th>#</th><th>Network</th><th>Usable range</th><th>Broadcast</th><th>Hosts</th></tr>";
+    let opts = "";
+    for (let q = r.p + 1; q <= maxP; q++) opts += `<option value="${q}">/${q} (${fmt(2 ** (q - r.p))} subnets)</option>`;
+    sel.innerHTML = opts;
+    const target = prev > r.p && prev <= maxP ? prev : Math.min(r.p + 2, 32);
+    sel.value = String(target);
+    const q = Number(sel.value), count = 2 ** (q - r.p), size = 2 ** (32 - q);
+    const borrowed = q - r.p;
+    $("splitSummary").textContent = `Borrowing ${borrowed} bit${borrowed > 1 ? "s" : ""} gives ${fmt(count)} subnets of ${fmt(size)} addresses each.`;
+    const shown = Math.min(count, 256);
+    const mineIdx = Math.floor((r.ip - r.network) / size);
+    let rows = "";
+    for (let i = 0; i < shown; i++) {
+      const s = calc(toU32(r.network + i * size), q);
+      const range = q === 32 ? ipStr(s.first) : `${ipStr(s.first)} – ${ipStr(s.last)}`;
+      rows += `<tr class="${i === mineIdx ? "mine" : ""}"><td>${i + 1}</td><td>${ipStr(s.network)}/${q}</td><td>${range}</td><td>${q >= 31 ? "—" : ipStr(s.broadcast)}</td><td>${fmt(s.usable)}</td></tr>`;
+    }
+    $("splitBody").innerHTML = rows;
+    $("splitMore").textContent = count > shown
+      ? `Showing the first ${shown} of ${fmt(count)} subnets.${mineIdx >= shown ? ` Your address is in subnet #${fmt(mineIdx + 1)}.` : ""}`
+      : "The highlighted row contains your address.";
+  }
+  // ---- IPv6 render ----
+  function renderResults6(r) {
+    const h = 128 - r.p;
+    const [ty, tyNote] = type6(r.ip);
+    const lans = r.p < 64 ? fmt(1n << BigInt(64 - r.p)) : r.p === 64 ? "1" : "—";
+    const lansNote = r.p < 64 ? "/64 LANs it can hold" : r.p === 64 ? "exactly one standard LAN" : "smaller than one /64 LAN";
+    $("results").innerHTML = [
+      cell("Network", `${compress6(r.network)}/${r.p}`, "address AND mask", "key"),
+      cell("Last address", compress6(r.last), "host bits all 1 · IPv6 has no broadcast", "hostc"),
+      cell("Addresses", h <= 32 ? fmt(r.total) : pow2(h), h <= 32 ? `${pow2(h)}, all usable` : fmt(r.total)),
+      cell("/64 networks", lans, lansNote),
+      cell("Expanded address", expand6(r.ip), "all 32 hex digits"),
+      cell("Prefix mask", compress6(r.mask), `${r.p} network bits, ${h} host bits`),
+      cell("Host part", compress6(r.ip & r.wild), "address AND inverted mask"),
+      cell("Type", `<span class="chip ${ty === "Global unicast" ? "pub" : ""}">${ty}</span>`, tyNote),
+    ].join("");
+  }
+  function nibRow(n, p, cls) {
+    const hex = n.toString(16).padStart(32, "0");
+    let html = `<div class="bitrow ${cls || ""}">`;
+    for (let g = 0; g < 8; g++) {
+      html += `<div class="octet">`;
+      for (let k = g * 4; k < g * 4 + 4; k++) {
+        const lo = k * 4, hi = lo + 4;
+        const c = hi <= p ? "n" : lo >= p ? "h" : "split";
+        const style = c === "split" ? ` style="--cut:${((p - lo) / 4) * 100}%"` : "";
+        const edge = hi === p && p < 128 ? " edge" : "";
+        html += `<span class="b ${c} ${hex[k] === "0" ? "zero" : "one"}${edge}"${style} data-p="${hi}">${hex[k]}</span>`;
+      }
+      html += `</div>`;
+    }
+    return html + `</div>`;
+  }
+  function renderBits6(r) {
+    const hx = Math.min(Math.floor(r.p / 16), 7); // hextet where the boundary falls
+    const row = (label, sub, n, cls) => `<div class="rl">${label}<small>${sub}</small></div>${nibRow(n, r.p, cls)}`;
+    const binRow = (label, n, cls) => {
+      const g = groups6(n)[hx], b = g.toString(2).padStart(16, "0");
+      let html = `<div class="rl">${label}<small>${g.toString(16).padStart(4, "0")} in binary</small></div><div class="bitrow ${cls || ""}">`;
+      for (let o = 0; o < 2; o++) {
+        html += `<div class="octet">`;
+        for (let j = o * 8; j < o * 8 + 8; j++) {
+          const abs = hx * 16 + j;
+          html += `<span class="b ${abs < r.p ? "n" : "h"} ${b[j] === "1" ? "one" : "zero"}${abs === r.p - 1 && r.p < 128 ? " edge" : ""}" data-p="${abs + 1}">${b[j]}</span>`;
+        }
+        html += `</div>`;
+      }
+      return html + `</div>`;
+    };
+    const bits = $("bits");
+    bits.className = "bits v6";
+    bits.innerHTML =
+      row("Address", "hex, 4 bits per digit", r.ip) +
+      row("Prefix mask", `${r.p} ones, ${128 - r.p} zeros`, r.mask, "mask-row") +
+      `<div class="op">AND: keep a bit only where the mask has a 1</div>` +
+      row("Network", "first address", r.network) +
+      `<div class="op">OR with inverted mask: set every host bit to 1</div>` +
+      row("Last address", "no broadcast in IPv6", r.last) +
+      `<div class="op">Zoom: hextet ${hx + 1}, where the boundary falls, in binary</div>` +
+      binRow("Address bits", r.ip) +
+      binRow("Mask bits", r.mask, "mask-row");
+    $("bitsNote").textContent = "Click a hex digit in the mask row to move the boundary in 4-bit steps, or a bit in the binary mask row to move it by 1.";
+  }
+  function renderSplit6(r) {
+    const sel = $("splitTo"), prev = Number(sel.value);
+    $("splitHead").innerHTML = "<tr><th>#</th><th>Network</th><th>First address</th><th>Last address</th><th>Addresses</th></tr>";
+    if (r.p >= 128) {
+      sel.innerHTML = ""; sel.disabled = true;
+      $("splitSummary").textContent = "A /128 is a single address and cannot be split.";
+      $("splitBody").innerHTML = ""; $("splitMore").textContent = ""; return;
+    }
+    sel.disabled = false;
+    const maxP = Math.min(128, r.p + 16);
+    let opts = "";
+    for (let q = r.p + 1; q <= maxP; q++) opts += `<option value="${q}">/${q} (${fmt(1n << BigInt(q - r.p))} subnets)</option>`;
+    sel.innerHTML = opts;
+    const dflt = r.p < 64 && 64 - r.p <= 16 ? 64 : Math.min(r.p + 4, 128);
+    sel.value = String(prev > r.p && prev <= maxP ? prev : dflt);
+    const q = Number(sel.value), borrowed = q - r.p;
+    const count = 1n << BigInt(borrowed), size = 1n << BigInt(128 - q);
+    $("splitSummary").innerHTML = `Borrowing ${borrowed} bit${borrowed > 1 ? "s" : ""} gives ${fmt(count)} subnets of ${128 - q <= 32 ? fmt(size) : pow2(128 - q)} addresses each.`;
+    const shown = count < 256n ? Number(count) : 256;
+    const mineIdx = (r.ip - r.network) / size;
+    let rows = "";
+    for (let i = 0; i < shown; i++) {
+      const s = calc6(r.network + BigInt(i) * size, q);
+      rows += `<tr class="${BigInt(i) === mineIdx ? "mine" : ""}"><td>${i + 1}</td><td>${compress6(s.network)}/${q}</td><td>${compress6(s.network)}</td><td>${compress6(s.last)}</td><td>${128 - q <= 32 ? fmt(s.total) : pow2(128 - q)}</td></tr>`;
+    }
+    $("splitBody").innerHTML = rows;
+    $("splitMore").textContent = count > BigInt(shown)
+      ? `Showing the first ${shown} of ${fmt(count)} subnets.${mineIdx >= BigInt(shown) ? ` Your address is in subnet #${fmt(mineIdx + 1n)}.` : ""}`
+      : "The highlighted row contains your address.";
+  }
+
+  function renderSplitCurrent() {
+    if (state.fam === 6) renderSplit6(calc6(state.ip, state.prefix));
+    else renderSplit(calc(state.ip, state.prefix));
+  }
+  function render() {
+    prefixEl.max = state.fam === 6 ? 128 : 32;
+    prefixEl.value = state.prefix;
+    prefixOut.textContent = "/" + state.prefix;
+    if (state.fam === 6) {
+      const r = calc6(state.ip, state.prefix);
+      renderResults6(r); renderBits6(r); renderSplit6(r);
+    } else {
+      const r = calc(state.ip, state.prefix);
+      $("bits").className = "bits";
+      $("bitsNote").textContent = "Click any bit in the mask row to move the boundary there.";
+      renderResults(r); renderBits(r); renderSplit(r);
+    }
+  }
+
+  // ---- events ----
+  function fromText() {
+    const res = parseInput(addrEl.value);
+    if (res.err) { addrEl.classList.add("bad"); hint.textContent = res.err; hint.classList.add("err"); return; }
+    addrEl.classList.remove("bad"); hint.textContent = DEFAULT_HINT; hint.classList.remove("err");
+    if (res.fam !== state.fam && res.prefix === null) state.prefix = res.fam === 6 ? 64 : 24;
+    state.fam = res.fam;
+    state.ip = res.ip;
+    if (res.prefix !== null) state.prefix = res.prefix;
+    render();
+  }
+  function setPrefix(p) {
+    state.prefix = p;
+    addrEl.value = `${state.fam === 6 ? compress6(state.ip) : ipStr(state.ip)}/${p}`;
+    addrEl.classList.remove("bad"); hint.textContent = DEFAULT_HINT; hint.classList.remove("err");
+    render();
+  }
+  addrEl.addEventListener("input", fromText);
+  prefixEl.addEventListener("input", () => setPrefix(Number(prefixEl.value)));
+  $("splitTo").addEventListener("change", renderSplitCurrent);
+  $("bits").addEventListener("click", (e) => {
+    const b = e.target.closest(".mask-row .b");
+    if (b) setPrefix(Number(b.dataset.p));
+  });
+  document.querySelectorAll("[data-ex]").forEach((btn) =>
+    btn.addEventListener("click", () => { addrEl.value = btn.dataset.ex; fromText(); }));
+
+  window.__subnet = { calc, parseInput, ipStr, prefixOfMask, calc6, parseIp6, compress6, expand6, type6 }; // for testing
+  fromText();
+})();
+</script>
+</body>
+</html>
